@@ -23,6 +23,29 @@ Schemas (blockers removed):
 */
 
 (() => {
+  window.onload = function () {
+    const userEmail = localStorage.getItem("userEmail");
+    const role = localStorage.getItem("role");
+    // Redirect to login if not authenticated
+    if (!userEmail || !role) {
+      window.location.href = "login.html";
+    }
+
+    if (role !== "ADMIN") {
+      settingsButton.style.display = "none";
+    }
+
+    if (role !== "ADMIN" && role !== "INSTRUCTOR") {
+      studentsButton.style.display = "none";
+      teamsButton.style.display = "none";
+    }
+
+    // Your existing app logic here
+    // Example: load content based on userEmail
+    // const mainContent = document.getElementById("mainContent");
+    // mainContent.innerHTML = `<h1>Welcome, ${userEmail}</h1>`;
+  };
+
   const HK_TZ = "Asia/Hong_Kong";
 
   // -------------------- Utilities --------------------
@@ -337,6 +360,7 @@ Schemas (blockers removed):
 
   // -------------------- Templates and Seeding (no blockers) --------------------
   const templates = {
+    /*
     goalTemplates: [
       "Complete literature review for 20 papers on transformer architectures",
       "Implement baseline CNN model for image classification",
@@ -421,7 +445,7 @@ Schemas (blockers removed):
         name: "EdTech",
         description: "Technology for education and learning analytics.",
       },
-    ],
+    ],*/
   };
 
   // Read data from canvas
