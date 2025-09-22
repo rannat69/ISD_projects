@@ -36,8 +36,7 @@ Schemas (blockers removed):
     }
 
     if (role !== "ADMIN" && role !== "INSTRUCTOR") {
-      studentsButton.style.display = "none";
-      teamsButton.style.display = "none";
+      coursesButton.style.display = "none";
     }
 
     // Your existing app logic here
@@ -1398,7 +1397,6 @@ Schemas (blockers removed):
       const tbody = table.querySelector("tbody");
       tbody.innerHTML = "";
 
-      
       let list = data.courses.slice();
       if (name) list = list.filter((s) => s.name.toLowerCase().includes(name));
 
@@ -1813,6 +1811,20 @@ Schemas (blockers removed):
         appState.selectedStudentId = null;
         render();
         document.getElementById("mainContent").focus();
+      }
+
+      console.log("btn", btn.id);
+
+      // if logout, display popup "Are you sure ?", if yes, clean local storage.
+      if (btn.id === "logoutButton") {
+        let userChoice = confirm("Are you sure you want to log out?");
+
+        if (userChoice) {
+          // Code to execute if the user clicks "OK" (Yes)
+          localStorage.removeItem("userEmail");
+          localStorage.removeItem("role");
+          window.location.reload();
+        }
       }
     });
 
