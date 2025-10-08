@@ -24,12 +24,36 @@ Schemas (blockers removed):
 
 (() => {
   window.onload = function () {
+    const loadSessionsFromSupabase = async () => {
+      const client = ensureSupabaseClient();
+
+      if (!client) return { data: null, missing: true };
+      const usersRes = await Promise.all([client.from("sessions").select("*")]);
+
+      const anyError = [usersRes].find((r) => r.error);
+      if (anyError) return { data: null, missing: true };
+      const result = {
+        users: usersRes[0].data || [],
+      };
+
+      return { data: result, missing: false };
+    };
+
     const userEmail = localStorage.getItem("userEmail");
     const role = localStorage.getItem("role");
     // Redirect to login if not authenticated
     if (!userEmail || !role) {
       window.location.href = "login.html";
     }
+
+    const sessionNumber = localStorage.getItem("sessionNumber");
+
+    // read table sessions with sessionNumber, email and role.
+    // if not match, redirect to login.html
+
+    const { data, missing } = loadSessionsFromSupabase();
+
+    console.log("data sessions", data);
 
     if (role !== "ADMIN") {
       settingsButton.style.display = "none";
@@ -1792,6 +1816,22 @@ Schemas (blockers removed):
   };
 
   const init = async () => {
+    const userEmail = localStorage.getItem("userEmail");
+    const role = localStorage.getItem("role");
+    // Redirect to login if not authenticated
+    if (!userEmail || !role) {
+      window.location.href = "login.html";
+    }
+
+    const sessionNumber = localStorage.getItem("sessionNumber");
+
+    // read table sessions with sessionNumber, email and role.
+    // if not match, redirect to login.html
+
+    const { data, missing } = loadSessionsFromSupabase();
+
+    console.log("data sessions", data);
+
     // Nav events
     document.querySelector(".nav").addEventListener("click", (e) => {
       const btn = e.target.closest(".nav-link");
