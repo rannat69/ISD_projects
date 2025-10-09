@@ -37,6 +37,7 @@ document.getElementById("loginForm").addEventListener("submit", function (e) {
 
   const loadUsersDataFromSupabase = async () => {
     const client = ensureSupabaseClient();
+    console.log("client userdata", client);
     if (!client) return { data: null, missing: true };
     const usersRes = await Promise.all([client.from("users").select("*")]);
 
@@ -47,6 +48,60 @@ document.getElementById("loginForm").addEventListener("submit", function (e) {
     };
 
     return { data: result, missing: false };
+  };
+
+  const setSession = async (email, role) => {
+    const client = ensureSupabaseClient();
+    console.log("client session", client);
+    if (!client) return { randNumber: 0, error: true };
+
+    // Initialiser le numéro aléatoire
+    let randNumber;
+
+    // Boucle jusqu'à ce qu'un numéro unique soit trouvé
+    let sessionData = [];
+    do {
+      randNumber = Math.floor(Math.random() * 1000000);
+
+      // Vérifiez si le numéro de session existe déjà
+      try {
+        console.log("randNumber", randNumber);
+
+        const { data, error } = await client
+          .from("sessions")
+          .select("*")
+          .eq("session_id", randNumber);
+
+        console.log("error", error);
+        console.log("data", data);
+        sessionData = data || [];
+
+        if (error) {
+          console.error(
+            "Erreur lors de la vérification de la session :",
+            error
+          );
+          return { randNumber: 0, error: true };
+        }
+      } catch (error) {
+        console.error("Erreur lors de la vérification de la session :", error);
+        return { randNumber: 0, error: true };
+      }
+    } while (sessionData.length > 0);
+
+    // create record in table session
+    const { data, error } = await client
+      .from("sessions")
+      .insert([{ session_id: randNumber, user_email: email, role: role }]);
+
+    if (error) {
+      console.error("Erreur lors de l'insertion de la session :", error);
+      return { randNumber: 0, error: true };
+    }
+
+    console.log("data", data);
+
+    return { randNumber: randNumber, error: false };
   };
 
   const checkEmailPass = async () => {
@@ -71,6 +126,18 @@ document.getElementById("loginForm").addEventListener("submit", function (e) {
           errorDiv.textContent = "Invalid user/password.";
           return null;
         }
+
+        const { randNumber, error } = await setSession(
+          email,
+          currentUser[0].role
+        );
+
+        if (error) {
+          errorDiv.textContent = "Error setting session.";
+          return null;
+        }
+
+        localStorage.setItem("sessionNumber", randNumber);
 
         localStorage.setItem("userEmail", email);
         localStorage.setItem("role", currentUser[0].role);
