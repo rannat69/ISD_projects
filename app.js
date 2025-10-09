@@ -24,21 +24,6 @@ Schemas (blockers removed):
 
 (() => {
   window.onload = function () {
-    const loadSessionsFromSupabase = async () => {
-      const client = ensureSupabaseClient();
-
-      if (!client) return { data: null, missing: true };
-      const usersRes = await Promise.all([client.from("sessions").select("*")]);
-
-      const anyError = [usersRes].find((r) => r.error);
-      if (anyError) return { data: null, missing: true };
-      const result = {
-        users: usersRes[0].data || [],
-      };
-
-      return { data: result, missing: false };
-    };
-
     const userEmail = localStorage.getItem("userEmail");
     const role = localStorage.getItem("role");
     // Redirect to login if not authenticated
@@ -50,10 +35,6 @@ Schemas (blockers removed):
 
     // read table sessions with sessionNumber, email and role.
     // if not match, redirect to login.html
-
-    const { data, missing } = loadSessionsFromSupabase();
-
-    console.log("data sessions", data);
 
     if (role !== "ADMIN") {
       settingsButton.style.display = "none";
@@ -1816,6 +1797,21 @@ Schemas (blockers removed):
   };
 
   const init = async () => {
+    const loadSessionsFromSupabase = async () => {
+      const client = ensureSupabaseClient();
+
+      if (!client) return { data: null, missing: true };
+      const usersRes = await Promise.all([client.from("sessions").select("*")]);
+
+      const anyError = [usersRes].find((r) => r.error);
+      if (anyError) return { data: null, missing: true };
+      const result = {
+        users: usersRes[0].data || [],
+      };
+
+      return { data: result, missing: false };
+    };
+
     const userEmail = localStorage.getItem("userEmail");
     const role = localStorage.getItem("role");
     // Redirect to login if not authenticated
@@ -1828,12 +1824,28 @@ Schemas (blockers removed):
     // read table sessions with sessionNumber, email and role.
     // if not match, redirect to login.html
 
-    const { data, missing } = loadSessionsFromSupabase();
+    const { data, missing } = await loadSessionsFromSupabase();
 
     console.log("data sessions", data);
 
+    // Look for record in data with same session_id, user_email and role
+    const session = data.users.filter(
+      (session) =>
+        session.session_id == sessionNumber &&
+        session.user_email == userEmail &&
+        session.role == role
+    );
+
+    if (session.length === 0) {
+      // delete sessionNumber from local storage
+      localStorage.removeItem("sessionNumber");
+      localStorage.removeItem("userEmail");
+      localStorage.removeItem("role");
+      window.location.href = "login.html";
+    }
+
     // Nav events
-    document.querySelector(".nav").addEventListener("click", (e) => {
+    document.querySelector(".nav").addEventListener("click", async (e) => {
       const btn = e.target.closest(".nav-link");
       if (!btn) return;
       const page = btn.dataset.page;
@@ -1863,6 +1875,23 @@ Schemas (blockers removed):
           // Code to execute if the user clicks "OK" (Yes)
           localStorage.removeItem("userEmail");
           localStorage.removeItem("role");
+          localStorage.removeItem("sessionNumber");
+
+          const deleteSessionFromSupabase = async () => {
+            const client = ensureSupabaseClient();
+
+            if (!client) return { data: null, missing: true };
+            const response = await client
+              .from("sessions")
+              .delete()
+              .eq("session_id", sessionNumber);
+
+            return response;
+          };
+
+          // Remove the session from the database
+          const response = await deleteSessionFromSupabase();
+
           window.location.reload();
         }
       }
