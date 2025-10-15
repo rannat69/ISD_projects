@@ -22,6 +22,18 @@ Schemas (blockers removed):
 - team_weekly_entries: id, team_id, week_start_date, team_goals_set_json, team_overall_status, team_progress_notes, next_week_team_goals_json, created_by, created_at, updated_at
 */
 
+import { renderTeams } from "./teams.js";
+
+import {
+  addDaysHK,
+  getCurrentMondayHKISO,
+  formatISOForDisplay,
+  HK_TZ,
+  getStudentById,
+} from "./tools.js";
+
+console.log("app.js loaded");
+
 (() => {
   window.onload = function () {
     const userEmail = localStorage.getItem("userEmail");
@@ -49,8 +61,6 @@ Schemas (blockers removed):
     // const mainContent = document.getElementById("mainContent");
     // mainContent.innerHTML = `<h1>Welcome, ${userEmail}</h1>`;
   };
-
-  const HK_TZ = "Asia/Hong_Kong";
 
   // -------------------- Utilities --------------------
   const uuid = () => {
@@ -88,31 +98,7 @@ Schemas (blockers removed):
 
   const dateFromHKISO = (isoYMD) => new Date(`${isoYMD}T00:00:00+08:00`);
 
-  const addDaysHK = (isoYMD, delta) => {
-    const base = dateFromHKISO(isoYMD);
-    const moved = new Date(base.getTime() + delta * 86400000);
-    return toHKISODate(moved);
-  };
-
-  const getCurrentMondayHKISO = () => {
-    const todayHK = toHKISODate(new Date());
-    const d = dateFromHKISO(todayHK);
-    const dow = getDayOfWeekHK(d);
-    const delta = (dow + 6) % 7;
-    const monday = new Date(d.getTime() - delta * 86400000);
-    return toHKISODate(monday);
-  };
-
   const isMondayHK = (isoYMD) => getDayOfWeekHK(dateFromHKISO(isoYMD)) === 1;
-
-  const formatISOForDisplay = (isoYMD) => {
-    const d = dateFromHKISO(isoYMD);
-    const day = new Intl.DateTimeFormat("en-US", {
-      timeZone: HK_TZ,
-      weekday: "short",
-    }).format(d);
-    return `${day}, ${isoYMD}`;
-  };
 
   const computeOverallStatusFromGoalStatuses = (statuses) => {
     if (!statuses || statuses.length === 0) return "not_achieved";
@@ -279,6 +265,7 @@ Schemas (blockers removed):
       teamsRes,
       membershipsRes,
       teamWeeklyRes,
+      teamExpensesRes,
     ] = await Promise.all([
       client.from("students").select("*"),
       client.from("courses").select("*"),
@@ -287,6 +274,7 @@ Schemas (blockers removed):
       client.from("teams").select("*"),
       client.from("team_memberships").select("*"),
       client.from("team_weekly_entries").select("*"),
+      client.from("team_expenses").select("*"),
     ]);
     const anyError = [
       studentsRes,
@@ -296,6 +284,7 @@ Schemas (blockers removed):
       teamsRes,
       membershipsRes,
       teamWeeklyRes,
+      teamExpensesRes,
     ].find((r) => r.error);
     if (anyError) return { data: null, missing: true };
     const result = {
@@ -306,6 +295,7 @@ Schemas (blockers removed):
       teams: teamsRes.data || [],
       team_memberships: membershipsRes.data || [],
       team_weekly_entries: teamWeeklyRes.data || [],
+      team_expenses: teamExpensesRes.data || [],
     };
     return { data: result, missing: false };
   };
@@ -621,7 +611,6 @@ Schemas (blockers removed):
   };
 
   // -------------------- Accessors & checks --------------------
-  const getStudentById = (data, id) => data.students.find((s) => s.id === id);
   const getTeamsByStudentId = (data, studentId) => {
     const teamIds = data.team_memberships
       .filter((m) => m.student_id === studentId)
@@ -685,7 +674,7 @@ Schemas (blockers removed):
     if (appState.page === "dashboard") return renderDashboard(container);
     if (appState.page === "students") return renderStudents(container);
     if (appState.page === "courses") return renderCourses(container);
-    if (appState.page === "teams") return renderTeams(container);
+    if (appState.page === "teams") return renderTeams(appState, container);
     if (appState.page === "reports") return renderReports(container);
     if (appState.page === "settings") return renderSettings(container);
     if (appState.page === "student_detail")
@@ -1524,82 +1513,6 @@ Schemas (blockers removed):
       root.appendChild(layout);
       root.appendChild(table);
     }
-  };
-
-  const renderTeams = (root) => {
-    const data = appState.data;
-
-    const header = document.createElement("div");
-    header.className = "page-header";
-    header.innerHTML = `<div class="page-title">Teams</div>`;
-
-    const grid = document.createElement("div");
-    grid.className = "grid-responsive";
-
-    const last3Mondays = [0, -7, -14].map((off) =>
-      addDaysHK(getCurrentMondayHKISO(), off)
-    );
-
-    for (const t of data.teams) {
-      const card = document.createElement("div");
-      card.className = "team-card";
-      const members = data.team_memberships
-        .filter((m) => m.team_id === t.id)
-        .map((m) => getStudentById(data, m.student_id).full_name);
-      const entries = data.team_weekly_entries
-        .filter((e) => e.team_id === t.id)
-        .sort((a, b) => (a.week_start_date < b.week_start_date ? 1 : -1));
-
-      card.innerHTML = `
-        <div class="team-header">
-          <div>
-            <div><strong>${t.team_name}</strong></div>
-            <div class="meta">${t.description}</div>
-          </div>
-          <div class="badge">Members: ${members.length}</div>
-        </div>
-        <div class="team-members">${members.join(", ")}</div>
-        <div class="separator"></div>
-        <div>
-          <div class="meta" style="margin-bottom:6px;">Last 3 Mondays</div>
-          ${last3Mondays
-            .map((w) => {
-              const e = entries.find((x) => x.week_start_date === w);
-              if (!e)
-                return `<div class="entry-card"><strong>${formatISOForDisplay(
-                  w
-                )}</strong><div class="meta">No entry</div></div>`;
-              const goals = JSON.parse(e.team_goals_set_json);
-              const ng = JSON.parse(e.next_week_team_goals_json);
-              return `
-              <div class="entry-card">
-                <div class="entry-header"><strong>${formatISOForDisplay(
-                  e.week_start_date
-                )}</strong> • <span class="chip ${
-                e.team_overall_status
-              }">${e.team_overall_status.replace("_", " ")}</span></div>
-                <div class="entry-body">
-                  <div><strong>Team goals</strong><div class="meta">${goals
-                    .map((g) => `• ${g}`)
-                    .join("<br/>")}</div></div>
-                  <div><strong>Progress notes</strong><div class="meta">${
-                    e.team_progress_notes || "-"
-                  }</div></div>
-                  <div><strong>Next week goals</strong><div class="meta">${ng
-                    .map((g) => `• ${g}`)
-                    .join("<br/>")}</div></div>
-                </div>
-              </div>
-            `;
-            })
-            .join("")}
-        </div>
-      `;
-      grid.appendChild(card);
-    }
-
-    root.appendChild(header);
-    root.appendChild(grid);
   };
 
   const renderReports = (root) => {
