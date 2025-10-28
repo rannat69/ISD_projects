@@ -1,3 +1,13 @@
+export const ensureSupabaseClient = (appState) => {
+  if (!appState.supabase.client && writeEnabled()) {
+    appState.supabase.client = window.supabase.createClient(
+      appState.supabase.url,
+      appState.supabase.key
+    );
+  }
+  return appState.supabase.client;
+};
+
 export const nowISO = () => new Date().toISOString();
 
 export const toHKISODate = (date) => {
@@ -52,3 +62,62 @@ export const HK_TZ = "Asia/Hong_Kong";
 
 export const getStudentById = (data, id) =>
   data.students.find((s) => s.id === id);
+
+export const getTeamsByStudentId = (data, studentId) => {
+  const teamIds = data.team_memberships
+    .filter((m) => m.student_id === studentId)
+    .map((m) => m.team_id);
+  return data.teams.filter((t) => teamIds.includes(t.id));
+};
+export const getEntriesByStudent = (data, studentId) =>
+  data.weekly_entries
+    .filter((e) => e.student_id === studentId)
+    .sort((a, b) => (a.week_start_date < b.week_start_date ? 1 : -1));
+export const getEntryByStudentAndWeek = (data, studentId, weekStart) =>
+  data.weekly_entries.find(
+    (e) => e.student_id === studentId && e.week_start_date === weekStart
+  );
+export const hasEntryThisWeek = (data, studentId, currentMonday) =>
+  !!getEntryByStudentAndWeek(data, studentId, currentMonday);
+
+export const ensureUniqueWeeklyEntry = (
+  data,
+  studentId,
+  weekStart,
+  ignoreEntryId = null
+) =>
+  !data.weekly_entries.some(
+    (e) =>
+      e.student_id === studentId &&
+      e.week_start_date === weekStart &&
+      e.id !== ignoreEntryId
+  );
+export const ensureUniqueTeamWeeklyEntry = (
+  data,
+  teamId,
+  weekStart,
+  ignoreId = null
+) =>
+  !data.team_weekly_entries.some(
+    (e) =>
+      e.team_id === teamId &&
+      e.week_start_date === weekStart &&
+      e.id !== ignoreId
+  );
+
+export const getCourseById = (data, id) =>
+  data.courses.find((s) => s.id === id);
+
+export const getEntriesByCourse = (data, courseId) =>
+  data.students_courses.filter((e) => e.course_id === courseId);
+
+export const writeEnabled = (appState) =>
+  !!(appState.supabase.url && appState.supabase.key);
+
+export const setActiveNav = (page) => {
+  document.querySelectorAll(".nav .nav-link").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.page === page);
+    if (btn.dataset.page === page) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  });
+};

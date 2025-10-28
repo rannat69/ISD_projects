@@ -35,11 +35,13 @@ document.getElementById("loginForm").addEventListener("submit", function (e) {
     return appState.supabase.client;
   };
 
-  const loadUsersDataFromSupabase = async () => {
+  const loadUserDataFromSupabase = async (email) => {
     const client = ensureSupabaseClient();
     console.log("client userdata", client);
     if (!client) return { data: null, missing: true };
-    const usersRes = await Promise.all([client.from("users").select("*")]);
+    const usersRes = await Promise.all([
+      client.from("users").select("*").eq("email", email),
+    ]);
 
     const anyError = [usersRes].find((r) => r.error);
     if (anyError) return { data: null, missing: true };
@@ -108,7 +110,7 @@ document.getElementById("loginForm").addEventListener("submit", function (e) {
     // Simple email validation
     if (email) {
       if (password) {
-        const { data, missing } = await loadUsersDataFromSupabase();
+        const { data, missing } = await loadUserDataFromSupabase(email);
         // check if email is present in
 
         console.log("users", data.users);

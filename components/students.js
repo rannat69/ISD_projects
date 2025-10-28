@@ -4,10 +4,13 @@ import {
   formatISOForDisplay,
   HK_TZ,
   getStudentById,
-  ensureSupabaseClient,
-} from "./tools.js";
+  getEntryByStudentAndWeek,
+  getEntriesByStudent,
+  getTeamsByStudentId,
+  writeEnabled, setActiveNav
+} from "../tools.js";
 
-const renderStudents = (root) => {
+export const renderStudents = (appState, root) => {
   const data = appState.data;
   const currentMonday = getCurrentMondayHKISO();
 
@@ -127,7 +130,7 @@ const renderStudents = (root) => {
         appState.page = "student_detail";
         appState.selectedStudentId = s.id;
         setActiveNav("students");
-        renderStudentDetail(root, s.id);
+        renderStudentDetail(appState, root, s.id);
       });
       tbody.appendChild(tr);
     }
@@ -145,14 +148,12 @@ const renderStudents = (root) => {
   applyFilters();
 };
 
-const renderStudentDetail = async (root, studentId) => {
-  const client = ensureSupabaseClient();
 
-  const data = client.from("students").select("*");
+
+export const renderStudentDetail = (appState, root, studentId) => {
+  const data = appState.data;
+  console.log("data", data);
   const student = getStudentById(data, studentId);
-
-  console.log("student", student);
-
   if (!student) return;
 
   root.innerHTML = "";
@@ -305,7 +306,7 @@ const renderStudentDetail = async (root, studentId) => {
   const cancelEditBtn = form.querySelector("#cancelEdit");
   const saveBtn = form.querySelector("#saveEntry");
 
-  if (!writeEnabled()) {
+  if (!writeEnabled(appState)) {
     saveBtn.disabled = true;
     saveBtn.title =
       "Provide Supabase URL and key in Settings to enable saving.";
@@ -436,7 +437,7 @@ const renderStudentDetail = async (root, studentId) => {
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!writeEnabled()) {
+    if (!writeEnabled(appState)) {
       showToast(
         "Write disabled. Configure Supabase URL/key in Settings.",
         "error"
@@ -559,5 +560,3 @@ const renderStudentDetail = async (root, studentId) => {
   root.appendChild(header);
   root.appendChild(layout);
 };
-
-export { renderStudents, renderStudentDetail };

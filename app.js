@@ -22,7 +22,15 @@ Schemas (blockers removed):
 - team_weekly_entries: id, team_id, week_start_date, team_goals_set_json, team_overall_status, team_progress_notes, next_week_team_goals_json, created_by, created_at, updated_at
 */
 
-import { renderTeams } from "./teams.js";
+import { renderStudents, renderStudentDetail } from "./components/students.js";
+import { renderTeams } from "./components/teams.js";
+import { renderCourses } from "./components/courses.js";
+import {
+  renderCheckRequest,
+  renderMakeRequest,
+} from "./components/requests.js";
+
+import { checkPermissions } from "./checkPermissions.js";
 
 import {
   addDaysHK,
@@ -30,31 +38,17 @@ import {
   formatISOForDisplay,
   HK_TZ,
   getStudentById,
+  hasEntryThisWeek,
+  getEntryByStudentAndWeek,
+  getEntriesByStudent,
+  getTeamsByStudentId,
+  writeEnabled,
+  setActiveNav,
 } from "./tools.js";
-
-console.log("app.js loaded");
 
 (() => {
   window.onload = function () {
-    const userEmail = localStorage.getItem("userEmail");
-    const role = localStorage.getItem("role");
-    // Redirect to login if not authenticated
-    if (!userEmail || !role) {
-      window.location.href = "login.html";
-    }
-
-    const sessionNumber = localStorage.getItem("sessionNumber");
-
-    // read table sessions with sessionNumber, email and role.
-    // if not match, redirect to login.html
-
-    if (role !== "ADMIN") {
-      settingsButton.style.display = "none";
-    }
-
-    if (role !== "ADMIN" && role !== "INSTRUCTOR") {
-      coursesButton.style.display = "none";
-    }
+    checkPermissions(appState);
 
     // Your existing app logic here
     // Example: load content based on userEmail
@@ -242,10 +236,8 @@ console.log("app.js loaded");
     },
   };
 
-  const writeEnabled = () => !!(appState.supabase.url && appState.supabase.key);
-
   const ensureSupabaseClient = () => {
-    if (!appState.supabase.client && writeEnabled()) {
+    if (!appState.supabase.client && writeEnabled(appState)) {
       appState.supabase.client = window.supabase.createClient(
         appState.supabase.url,
         appState.supabase.key
@@ -611,52 +603,6 @@ console.log("app.js loaded");
   };
 
   // -------------------- Accessors & checks --------------------
-  const getTeamsByStudentId = (data, studentId) => {
-    const teamIds = data.team_memberships
-      .filter((m) => m.student_id === studentId)
-      .map((m) => m.team_id);
-    return data.teams.filter((t) => teamIds.includes(t.id));
-  };
-  const getEntriesByStudent = (data, studentId) =>
-    data.weekly_entries
-      .filter((e) => e.student_id === studentId)
-      .sort((a, b) => (a.week_start_date < b.week_start_date ? 1 : -1));
-  const getEntryByStudentAndWeek = (data, studentId, weekStart) =>
-    data.weekly_entries.find(
-      (e) => e.student_id === studentId && e.week_start_date === weekStart
-    );
-  const hasEntryThisWeek = (data, studentId, currentMonday) =>
-    !!getEntryByStudentAndWeek(data, studentId, currentMonday);
-
-  const ensureUniqueWeeklyEntry = (
-    data,
-    studentId,
-    weekStart,
-    ignoreEntryId = null
-  ) =>
-    !data.weekly_entries.some(
-      (e) =>
-        e.student_id === studentId &&
-        e.week_start_date === weekStart &&
-        e.id !== ignoreEntryId
-    );
-  const ensureUniqueTeamWeeklyEntry = (
-    data,
-    teamId,
-    weekStart,
-    ignoreId = null
-  ) =>
-    !data.team_weekly_entries.some(
-      (e) =>
-        e.team_id === teamId &&
-        e.week_start_date === weekStart &&
-        e.id !== ignoreId
-    );
-
-  const getCourseById = (data, id) => data.courses.find((s) => s.id === id);
-
-  const getEntriesByCourse = (data, courseId) =>
-    data.students_courses.filter((e) => e.course_id === courseId);
 
   // -------------------- Rendering --------------------
   const setActiveNav = (page) => {
@@ -672,13 +618,24 @@ console.log("app.js loaded");
     container.innerHTML = "";
     setActiveNav(appState.page);
     if (appState.page === "dashboard") return renderDashboard(container);
-    if (appState.page === "students") return renderStudents(container);
-    if (appState.page === "courses") return renderCourses(container);
+    if (appState.page === "students")
+      return renderStudents(appState, container);
+    if (appState.page === "courses") return renderCourses(appState, container);
     if (appState.page === "teams") return renderTeams(appState, container);
     if (appState.page === "reports") return renderReports(container);
     if (appState.page === "settings") return renderSettings(container);
+
+    if (appState.page === "makeRequest")
+      return renderMakeRequest(appState, container);
+    if (appState.page === "checkRequest")
+      return renderCheckRequest(appState, container);
+
     if (appState.page === "student_detail")
-      return renderStudentDetail(container, appState.selectedStudentId);
+      return renderStudentDetail(
+        appState,
+        container,
+        appState.selectedStudentId
+      );
   };
 
   const renderDashboard = (root) => {
@@ -784,7 +741,7 @@ console.log("app.js loaded");
         appState.page = "student_detail";
         appState.selectedStudentId = s.id;
         setActiveNav("students");
-        renderStudentDetail(root, s.id);
+        renderStudentDetail(appState, root, s.id);
       });
       tbody.appendChild(tr);
     }
@@ -794,725 +751,6 @@ console.log("app.js loaded");
     root.appendChild(header);
     root.appendChild(kpis);
     root.appendChild(recentCard);
-  };
-
-  const renderStudents = (root) => {
-    const data = appState.data;
-    const currentMonday = getCurrentMondayHKISO();
-
-    const header = document.createElement("div");
-    header.className = "page-header";
-    header.innerHTML = `<div class="page-title">Students</div>`;
-
-    const controls = document.createElement("div");
-    controls.className = "filters";
-    controls.innerHTML = `
-      <input type="text" class="input" id="searchName" placeholder="Search by name" value="${
-        appState.filters.search
-      }" />
-      <select id="filterStatus">
-        <option value="all">All statuses</option>
-        <option value="active">Active</option>
-        <option value="inactive">Inactive</option>
-      </select>
-      <select id="filterTeam">
-        <option value="all">All teams</option>
-        ${data.teams
-          .map((t) => `<option value="${t.id}">${t.team_name}</option>`)
-          .join("")}
-      </select>
-      <select id="filterThisWeek">
-        <option value="all">All</option>
-        <option value="yes">Has entry this week</option>
-        <option value="no">No entry this week</option>
-      </select>
-    `;
-
-    const table = document.createElement("table");
-    table.className = "table";
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Research Area</th>
-          <th>Current Week Status</th>
-          <th>Goals Achieved (#)</th>
-          <th>Last Updated</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    `;
-
-    const applyFilters = () => {
-      const name = document
-        .getElementById("searchName")
-        .value.trim()
-        .toLowerCase();
-      const status = document.getElementById("filterStatus").value;
-      const team = document.getElementById("filterTeam").value;
-      const thisWeek = document.getElementById("filterThisWeek").value;
-
-      appState.filters = {
-        search: name,
-        status,
-        team,
-        hasEntryThisWeek: thisWeek,
-      };
-
-      const tbody = table.querySelector("tbody");
-      tbody.innerHTML = "";
-
-      let list = data.students.slice();
-      if (name)
-        list = list.filter((s) => s.full_name.toLowerCase().includes(name));
-      if (status !== "all") list = list.filter((s) => s.status === status);
-      if (team !== "all") {
-        const memberIds = data.team_memberships
-          .filter((m) => m.team_id === team)
-          .map((m) => m.student_id);
-        list = list.filter((s) => memberIds.includes(s.id));
-      }
-      if (thisWeek !== "all") {
-        list = list.filter(
-          (s) =>
-            hasEntryThisWeek(data, s.id, currentMonday) === (thisWeek === "yes")
-        );
-      }
-      list.sort((a, b) => a.full_name.localeCompare(b.full_name));
-
-      for (const s of list) {
-        const current = getEntryByStudentAndWeek(data, s.id, currentMonday);
-        const chip = current
-          ? `<span class="chip ${
-              current.overall_status
-            }">${current.overall_status.replace("_", " ")}</span>`
-          : '<span class="meta">No entry</span>';
-        let goalsAchieved = "-";
-        if (current) {
-          const statuses = JSON.parse(current.per_goal_status_json);
-          const total = statuses.length;
-          const achieved = statuses.filter((x) => x === "achieved").length;
-          goalsAchieved = `${achieved}/${total}`;
-        }
-        const lastUpdated = (() => {
-          const entries = getEntriesByStudent(data, s.id);
-          if (!entries.length) return "";
-          const maxUpdated = entries.reduce(
-            (acc, e) => (acc > e.updated_at ? acc : e.updated_at),
-            entries[0].updated_at
-          );
-          return new Date(maxUpdated).toLocaleString();
-        })();
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${s.full_name}</td>
-          <td>${s.research_area}</td>
-          <td>${chip}</td>
-          <td>${goalsAchieved}</td>
-          <td>${lastUpdated}</td>
-        `;
-        tr.addEventListener("click", () => {
-          appState.page = "student_detail";
-          appState.selectedStudentId = s.id;
-          setActiveNav("students");
-          renderStudentDetail(root, s.id);
-        });
-        tbody.appendChild(tr);
-      }
-    };
-
-    controls.addEventListener("input", (e) => {
-      if (["searchName"].includes(e.target.id)) applyFilters();
-    });
-    controls.addEventListener("change", applyFilters);
-
-    root.appendChild(header);
-    root.appendChild(controls);
-    root.appendChild(table);
-
-    applyFilters();
-  };
-
-  const renderStudentDetail = (root, studentId) => {
-    const data = appState.data;
-    const student = getStudentById(data, studentId);
-    if (!student) return;
-
-    root.innerHTML = "";
-
-    const header = document.createElement("div");
-    header.className = "page-header";
-
-    const teams = getTeamsByStudentId(data, studentId);
-    const teamsText = teams
-      .map((t) => `<span class="badge">${t.team_name}</span>`)
-      .join(" ");
-
-    const fourMondays = [0, -7, -14, -21].map((off) =>
-      addDaysHK(getCurrentMondayHKISO(), off)
-    );
-    const chips = fourMondays
-      .map((w) => {
-        const e = getEntryByStudentAndWeek(data, studentId, w);
-        return e
-          ? `<span class="chip ${e.overall_status}">${e.overall_status.replace(
-              "_",
-              " "
-            )}</span>`
-          : '<span class="badge">No entry</span>';
-      })
-      .join(" ");
-
-    header.innerHTML = `
-      <div>
-        <div class="page-title">${student.full_name}</div>
-        <div class="meta">${student.research_area} • Supervisor: ${student.supervisor} • Status: ${student.status}</div>
-        <div style="margin-top:8px; display:flex; gap:6px; align-items:center; flex-wrap: wrap;">${teamsText}</div>
-      </div>
-      <div>
-        <div class="meta" style="margin-bottom:6px;">Last 4 weeks</div>
-        <div style="display:flex; gap:6px; flex-wrap: wrap;">${chips}</div>
-      </div>
-    `;
-
-    const layout = document.createElement("div");
-    layout.className = "grid-2";
-
-    // Timeline
-    const timeline = document.createElement("div");
-    const title = document.createElement("div");
-    title.className = "card";
-    title.innerHTML = `<div class="card-header"><strong>Weekly entries</strong></div>`;
-
-    const entries = getEntriesByStudent(data, studentId);
-    if (!entries.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty";
-      empty.textContent =
-        "No entries for this week yet. Use 'Duplicate last week’s goals' to get started.";
-      title.appendChild(empty);
-    } else {
-      for (const e of entries) {
-        const card = document.createElement("div");
-        card.className = "entry-card";
-        const goals = JSON.parse(e.goals_set_json);
-        const statuses = JSON.parse(e.per_goal_status_json);
-        const nextGoals = JSON.parse(e.next_week_goals_json);
-        const ga = statuses.filter((s) => s === "achieved").length;
-        card.innerHTML = `
-          <div class="entry-header">
-            <div><strong>${formatISOForDisplay(
-              e.week_start_date
-            )}</strong> • <span class="chip ${
-          e.overall_status
-        }">${e.overall_status.replace("_", " ")}</span></div>
-            <div>
-              <button class="button" data-edit="${e.id}">Edit</button>
-            </div>
-          </div>
-          <div class="entry-body">
-            <div><strong>Goals (${ga}/${
-          goals.length
-        } achieved)</strong><div style="margin-top:6px; display:grid; gap:6px;">${goals
-          .map(
-            (g, i) =>
-              `<div><span class="status-dot ${
-                statuses[i]
-              }"></span> ${g} (${statuses[i].replace("_", " ")})</div>`
-          )
-          .join("")}</div></div>
-            <div><strong>Progress notes</strong><div class="meta">${
-              e.progress_notes || "-"
-            }</div></div>
-            <div><strong>Next week goals</strong><div class="meta">${nextGoals
-              .map((g) => `• ${g}`)
-              .join("<br/>")}</div></div>
-          </div>
-        `;
-        title.appendChild(card);
-      }
-    }
-
-    // Form
-    const formCard = document.createElement("div");
-    formCard.className = "card";
-    formCard.innerHTML = `<div class="card-header"><strong>Quick add / edit weekly entry</strong></div>`;
-
-    const form = document.createElement("form");
-    form.className = "entry-form";
-
-    const defaultMonday = getCurrentMondayHKISO();
-
-    form.innerHTML = `
-      <div class="grid-3">
-        <div class="field">
-          <label for="weekDate">Week (Monday)</label>
-          <input id="weekDate" name="weekDate" type="date" class="input" value="${defaultMonday}" required />
-          <div class="help">HK timezone enforced</div>
-        </div>
-        <div class="field">
-          <label>&nbsp;</label>
-          <button type="button" class="button ghost" id="duplicateGoals">Duplicate last week’s goals</button>
-        </div>
-      </div>
-
-      <div class="field">
-        <label>Goals</label>
-        <div id="goalsList" class="grid-responsive"></div>
-        <button type="button" class="button" id="addGoal">+ Add Goal</button>
-      </div>
-
-      <div class="field">
-        <label>Progress notes</label>
-        <textarea id="progressNotes" rows="3"></textarea>
-      </div>
-
-      <div class="field">
-        <label>Next week goals</label>
-        <div id="nextGoalsList" class="grid-responsive"></div>
-        <button type="button" class="button" id="addNextGoal">+ Add Next Week Goal</button>
-      </div>
-
-      <div>
-        <button type="submit" class="button primary" id="saveEntry">Save Entry</button>
-        <button type="button" class="button" id="cancelEdit" style="display:none;">Cancel Edit</button>
-        <span class="meta" id="formModeLabel">Creating new entry</span>
-      </div>
-    `;
-
-    const goalsList = form.querySelector("#goalsList");
-    const nextGoalsList = form.querySelector("#nextGoalsList");
-    const weekDateInput = form.querySelector("#weekDate");
-    const progressNotesInput = form.querySelector("#progressNotes");
-    const formModeLabel = form.querySelector("#formModeLabel");
-    const cancelEditBtn = form.querySelector("#cancelEdit");
-    const saveBtn = form.querySelector("#saveEntry");
-
-    if (!writeEnabled()) {
-      saveBtn.disabled = true;
-      saveBtn.title =
-        "Provide Supabase URL and key in Settings to enable saving.";
-    }
-
-    const makeGoalRow = (goalText = "") => {
-      const div = document.createElement("div");
-      div.className = "goal-row";
-      div.innerHTML = `
-        <input type="text" class="input goal-text" placeholder="Goal description" value="${goalText.replace(
-          /\"/g,
-          "&quot;"
-        )}" />
-        <select class="goal-status">
-          <option value="achieved">achieved</option>
-          <option value="partial" selected>partial</option>
-          <option value="not_achieved">not_achieved</option>
-        </select>
-        <button type="button" class="remove" aria-label="Remove goal">✕</button>
-      `;
-      div
-        .querySelector(".remove")
-        .addEventListener("click", () => div.remove());
-      return div;
-    };
-
-    const makeNextGoalRow = (goalText = "") => {
-      const div = document.createElement("div");
-      div.className = "next-goal-row";
-      div.innerHTML = `
-        <input type="text" class="input next-goal-text" placeholder="Next week goal" value="${goalText.replace(
-          /\"/g,
-          "&quot;"
-        )}" />
-        <button type="button" class="remove" aria-label="Remove goal">✕</button>
-      `;
-      div
-        .querySelector(".remove")
-        .addEventListener("click", () => div.remove());
-      return div;
-    };
-
-    const addGoal = (text = "") => goalsList.appendChild(makeGoalRow(text));
-    const addNextGoal = (text = "") =>
-      nextGoalsList.appendChild(makeNextGoalRow(text));
-
-    if (!goalsList.children.length) addGoal("");
-    if (!nextGoalsList.children.length) addNextGoal("");
-
-    form.querySelector("#addGoal").addEventListener("click", () => addGoal(""));
-    form
-      .querySelector("#addNextGoal")
-      .addEventListener("click", () => addNextGoal(""));
-
-    form.querySelector("#duplicateGoals").addEventListener("click", () => {
-      const dateISO = weekDateInput.value;
-      const current = getEntriesByStudent(data, studentId);
-      const sorted = current
-        .slice()
-        .sort((a, b) => (a.week_start_date < b.week_start_date ? 1 : -1));
-      const targetDate = dateISO;
-      const prev = sorted.find((e) => e.week_start_date < targetDate);
-      if (prev) {
-        const nextGoals = JSON.parse(prev.next_week_goals_json);
-        goalsList.innerHTML = "";
-        nextGoals.forEach((g) => addGoal(g));
-        showToast(
-          "Copied last week's next week goals into goals. Statuses reset.",
-          "success"
-        );
-      } else {
-        showToast("No previous week found to duplicate from.", "info");
-      }
-    });
-
-    weekDateInput.addEventListener("change", () => {
-      const iso = weekDateInput.value;
-      if (!isMondayHK(iso)) {
-        showToast("Selected date must be a Monday (HK time).", "error");
-        weekDateInput.value = getCurrentMondayHKISO();
-      }
-      if (appState.formEditingEntryId) {
-        const editing = data.weekly_entries.find(
-          (e) => e.id === appState.formEditingEntryId
-        );
-        if (editing)
-          formModeLabel.textContent = `Editing entry for ${formatISOForDisplay(
-            weekDateInput.value
-          )}`;
-      }
-    });
-
-    const loadEntryIntoForm = (entry) => {
-      appState.formEditingEntryId = entry.id;
-      cancelEditBtn.style.display = "inline-flex";
-      weekDateInput.value = entry.week_start_date;
-      progressNotesInput.value = entry.progress_notes || "";
-      goalsList.innerHTML = "";
-      nextGoalsList.innerHTML = "";
-      const goals = JSON.parse(entry.goals_set_json);
-      const statuses = JSON.parse(entry.per_goal_status_json);
-      goals.forEach((g, i) => {
-        const row = makeGoalRow(g);
-        row.querySelector(".goal-status").value = statuses[i] || "partial";
-        goalsList.appendChild(row);
-      });
-      const nx = JSON.parse(entry.next_week_goals_json);
-      nx.forEach((g) => nextGoalsList.appendChild(makeNextGoalRow(g)));
-      formModeLabel.textContent = `Editing entry for ${formatISOForDisplay(
-        entry.week_start_date
-      )}`;
-    };
-
-    cancelEditBtn.addEventListener("click", () => {
-      appState.formEditingEntryId = null;
-      cancelEditBtn.style.display = "none";
-      formModeLabel.textContent = "Creating new entry";
-      weekDateInput.value = defaultMonday;
-      progressNotesInput.value = "";
-      goalsList.innerHTML = "";
-      nextGoalsList.innerHTML = "";
-      addGoal("");
-      addNextGoal("");
-    });
-
-    title.addEventListener("click", (e) => {
-      const id = e.target && e.target.getAttribute("data-edit");
-      if (!id) return;
-      const entry = data.weekly_entries.find((x) => x.id === id);
-      if (entry) loadEntryIntoForm(entry);
-    });
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!writeEnabled()) {
-        showToast(
-          "Write disabled. Configure Supabase URL/key in Settings.",
-          "error"
-        );
-        return;
-      }
-      const weekISO = weekDateInput.value;
-      if (!isMondayHK(weekISO)) {
-        showToast("Selected date must be a Monday (HK time).", "error");
-        return;
-      }
-      const goals = Array.from(goalsList.querySelectorAll(".goal-text"))
-        .map((i) => i.value.trim())
-        .filter(Boolean);
-      const statuses = Array.from(
-        goalsList.querySelectorAll(".goal-status")
-      ).map((s) => s.value);
-      const nextGoals = Array.from(
-        nextGoalsList.querySelectorAll(".next-goal-text")
-      )
-        .map((i) => i.value.trim())
-        .filter(Boolean);
-      if (goals.length === 0) {
-        showToast("At least one goal is required.", "error");
-        return;
-      }
-      if (nextGoals.length === 0) {
-        showToast("At least one goal is required.", "error");
-        return;
-      }
-
-      const overall = computeOverallStatusFromGoalStatuses(statuses);
-
-      try {
-        if (!appState.formEditingEntryId) {
-          if (!ensureUniqueWeeklyEntry(data, studentId, weekISO)) {
-            showToast("Duplicate entry for this student and week.", "error");
-            return;
-          }
-          const entry = {
-            id: uuid(),
-            student_id: studentId,
-            week_start_date: weekISO,
-            goals_set_json: JSON.stringify(goals),
-            per_goal_status_json: JSON.stringify(statuses),
-            overall_status: overall,
-            progress_notes: progressNotesInput.value.trim(),
-            next_week_goals_json: JSON.stringify(nextGoals),
-            created_by: "demo_user",
-            created_at: nowISO(),
-            updated_at: nowISO(),
-          };
-          data.weekly_entries.push(entry);
-          showToast("Saving…", "info");
-          try {
-            const client = ensureSupabaseClient();
-            await client.from("weekly_entries").insert(entry);
-            showToast("Weekly entry saved.", "success");
-          } catch (err) {
-            console.error(err);
-            showToast("Save error. Check console and Settings.", "error");
-          }
-          renderStudentDetail(root, studentId);
-        } else {
-          const existing = data.weekly_entries.find(
-            (e) => e.id === appState.formEditingEntryId
-          );
-          if (!existing) {
-            showToast("Editing target not found.", "error");
-            return;
-          }
-          if (!ensureUniqueWeeklyEntry(data, studentId, weekISO, existing.id)) {
-            showToast("Duplicate entry for this student and week.", "error");
-            return;
-          }
-          existing.week_start_date = weekISO;
-          existing.goals_set_json = JSON.stringify(goals);
-          existing.per_goal_status_json = JSON.stringify(statuses);
-          existing.overall_status = overall;
-          existing.progress_notes = progressNotesInput.value.trim();
-          existing.next_week_goals_json = JSON.stringify(nextGoals);
-          existing.updated_at = nowISO();
-          showToast("Saving…", "info");
-          try {
-            const client = ensureSupabaseClient();
-            await client
-              .from("weekly_entries")
-              .update({
-                student_id: existing.student_id,
-                week_start_date: existing.week_start_date,
-                goals_set_json: existing.goals_set_json,
-                per_goal_status_json: existing.per_goal_status_json,
-                overall_status: existing.overall_status,
-                progress_notes: existing.progress_notes,
-                next_week_goals_json: existing.next_week_goals_json,
-                created_by: existing.created_by,
-                created_at: existing.created_at,
-                updated_at: existing.updated_at,
-              })
-              .eq("id", existing.id);
-            showToast("Weekly entry saved.", "success");
-          } catch (err) {
-            console.error(err);
-            showToast("Save error. Check console and Settings.", "error");
-          }
-          renderStudentDetail(root, studentId);
-        }
-      } catch (err) {
-        console.error(err);
-        showToast("Save error. Check console and Settings.", "error");
-      }
-    });
-
-    timeline.appendChild(title);
-    formCard.appendChild(form);
-
-    layout.appendChild(formCard);
-    layout.appendChild(timeline);
-
-    root.appendChild(header);
-    root.appendChild(layout);
-  };
-
-  const renderCourses = (root) => {
-    const data = appState.data;
-    const currentMonday = getCurrentMondayHKISO();
-
-    const header = document.createElement("div");
-    header.className = "page-header";
-    header.innerHTML = `<div class="page-title">Courses</div>`;
-
-    const controls = document.createElement("div");
-    controls.className = "filters";
-    controls.innerHTML = `
-      <input type="text" class="input" id="searchName" placeholder="Search by name" value="${appState.filters.search}" />
-
-    `;
-
-    const table = document.createElement("table");
-    table.className = "table";
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Description</th>
-          <th>Start Date</th>
-
-          <th>Last Updated</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    `;
-
-    const applyFiltersCourse = () => {
-      const name = document
-        .getElementById("searchName")
-        .value.trim()
-        .toLowerCase();
-
-      appState.filters = {
-        search: name,
-      };
-
-      const tbody = table.querySelector("tbody");
-      tbody.innerHTML = "";
-
-      let list = data.courses.slice();
-      if (name) list = list.filter((s) => s.name.toLowerCase().includes(name));
-
-      list.sort((a, b) => a.name.localeCompare(b.name));
-
-      for (const s of list) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${s.name}</td>
-          <td>${s.description}</td>
-          <td>${s.start_date}</td>
-        `;
-        tr.addEventListener("click", () => {
-          appState.page = "course_detail";
-          appState.selectedStudentId = s.id;
-          setActiveNav("courses");
-          renderCourseDetail(root, s.id);
-        });
-        tbody.appendChild(tr);
-      }
-    };
-
-    controls.addEventListener("input", (e) => {
-      if (["searchName"].includes(e.target.id)) applyFiltersCourse();
-    });
-    controls.addEventListener("change", applyFiltersCourse);
-
-    root.appendChild(header);
-    root.appendChild(controls);
-    root.appendChild(table);
-
-    applyFiltersCourse();
-  };
-
-  const renderCourseDetail = (root, courseId) => {
-    const data = appState.data;
-    const course = getCourseById(data, courseId);
-    if (!course) return;
-
-    root.innerHTML = "";
-
-    const header = document.createElement("div");
-    header.className = "page-header";
-
-    const teams = getTeamsByStudentId(data, courseId);
-    const teamsText = teams
-      .map((t) => `<span class="badge">${t.team_name}</span>`)
-      .join(" ");
-
-    const fourMondays = [0, -7, -14, -21].map((off) =>
-      addDaysHK(getCurrentMondayHKISO(), off)
-    );
-    const chips = fourMondays
-      .map((w) => {
-        const e = getEntryByStudentAndWeek(data, courseId, w);
-        return e
-          ? `<span class="chip ${e.overall_status}">${e.overall_status.replace(
-              "_",
-              " "
-            )}</span>`
-          : '<span class="badge">No entry</span>';
-      })
-      .join(" ");
-
-    header.innerHTML = `
-      <div>
-        <div class="page-title">${course.name}</div>
-       <div class="page-title">${course.description}</div>
-      </div>
-    `;
-    root.appendChild(header);
-    const title = document.createElement("div");
-    title.className = "card";
-    title.innerHTML = `<div class="card-header"><strong>Students in this course</strong></div>`;
-
-    const layout = document.createElement("div");
-    layout.className = "grid-2";
-
-    const entries = getEntriesByCourse(data, courseId);
-    if (!entries.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty";
-      empty.textContent = "No students for this course.";
-      root.appendChild(empty); // Ajoutez le message à root
-    } else {
-      // Créez la table une seule fois
-      const table = document.createElement("table");
-      table.className = "table";
-
-      // Créez l'en-tête de la table
-      table.innerHTML = `
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Email</th>
-            <th>Cohort</th>
-        <th>Start Date</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  `;
-
-      const tbody = table.querySelector("tbody");
-
-      // Remplissez le tbody avec les lignes pour chaque étudiant
-      for (const e of entries) {
-        const student = getStudentById(data, e.student_id); // Récupérer l'étudiant
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-      <td>${student.full_name}</td>
-      <td>${student.email}</td>
-            <td>${student.cohort}</td>
-      <td>${student.start_date}</td>
-    `;
-
-        tbody.appendChild(tr); // Ajoutez la ligne au tbody
-      }
-
-      root.appendChild(layout);
-      root.appendChild(table);
-    }
   };
 
   const renderReports = (root) => {
@@ -1633,12 +871,12 @@ console.log("app.js loaded");
         <button class="button primary" id="initData">Initialize Data</button>
       </div>
       <div class="meta" style="margin-top:6px;">Write is ${
-        writeEnabled() ? "enabled" : "disabled (read-only)"
+        writeEnabled(appState) ? "enabled" : "disabled (read-only)"
       }.</div>
     `;
 
     const initBtn = card.querySelector("#initData");
-    if (!writeEnabled()) {
+    if (!writeEnabled(appState)) {
       initBtn.disabled = true;
       initBtn.title = "Provide Supabase URL and key to initialize.";
     }
@@ -1654,7 +892,7 @@ console.log("app.js loaded");
     });
 
     card.querySelector("#initData").addEventListener("click", async () => {
-      if (!writeEnabled()) {
+      if (!writeEnabled(appState)) {
         showToast("Write disabled. Provide Supabase URL/key.", "error");
         return;
       }
@@ -1684,7 +922,7 @@ console.log("app.js loaded");
         appState.data = data;
         showToast("Data loaded from Supabase.", "success");
       } else {
-        if (writeEnabled()) {
+        if (writeEnabled(appState)) {
           const seed = seedInitialDataWithoutBlockers();
           await seedAllDataToSupabase(seed);
           appState.data = seed;
@@ -1770,6 +1008,8 @@ console.log("app.js loaded");
           "teams",
           "reports",
           "settings",
+          "checkRequest",
+          "makeRequest",
         ].includes(page)
       ) {
         appState.page = page;
@@ -1777,8 +1017,6 @@ console.log("app.js loaded");
         render();
         document.getElementById("mainContent").focus();
       }
-
-      console.log("btn", btn.id);
 
       // if logout, display popup "Are you sure ?", if yes, clean local storage.
       if (btn.id === "logoutButton") {

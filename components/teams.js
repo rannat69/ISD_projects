@@ -4,7 +4,7 @@ import {
   formatISOForDisplay,
   HK_TZ,
   getStudentById,
-} from "./tools.js";
+} from "../tools.js";
 
 export const renderTeams = (appState, root) => {
   const data = appState.data;
@@ -31,8 +31,6 @@ export const renderTeams = (appState, root) => {
       .sort((a, b) => (a.week_start_date < b.week_start_date ? 1 : -1));
 
     const expenses = data.team_expenses.filter((e) => e.team_id === t.id);
-
-    console.log("expenses", expenses);
 
     card.innerHTML = `
         <div class="team-header">
