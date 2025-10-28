@@ -25,10 +25,8 @@ Schemas (blockers removed):
 import { renderStudents, renderStudentDetail } from "./components/students.js";
 import { renderTeams } from "./components/teams.js";
 import { renderCourses } from "./components/courses.js";
-import {
-  renderCheckRequest,
-  renderMakeRequest,
-} from "./components/requests.js";
+import { renderInstructors } from "./components/instructors.js";
+import { renderRequests, renderMakeRequest } from "./components/requests.js";
 
 import { checkPermissions } from "./checkPermissions.js";
 
@@ -252,42 +250,50 @@ import {
     const [
       studentsRes,
       coursesRes,
+      instructorsRes,
       studentsCoursesRes,
       weeklyRes,
       teamsRes,
       membershipsRes,
       teamWeeklyRes,
       teamExpensesRes,
+      requestsRes,
     ] = await Promise.all([
       client.from("students").select("*"),
       client.from("courses").select("*"),
+      client.from("instructors").select("*"),
       client.from("students_courses").select("*"),
       client.from("weekly_entries").select("*"),
       client.from("teams").select("*"),
       client.from("team_memberships").select("*"),
       client.from("team_weekly_entries").select("*"),
       client.from("team_expenses").select("*"),
+      client.from("requests").select("*"),
     ]);
     const anyError = [
       studentsRes,
       coursesRes,
+      instructorsRes,
       studentsCoursesRes,
       weeklyRes,
       teamsRes,
       membershipsRes,
       teamWeeklyRes,
       teamExpensesRes,
+      requestsRes,
     ].find((r) => r.error);
     if (anyError) return { data: null, missing: true };
     const result = {
       students: studentsRes.data || [],
       courses: coursesRes.data || [],
+      instructors: instructorsRes.data || [],
       students_courses: studentsCoursesRes.data || [],
       weekly_entries: weeklyRes.data || [],
       teams: teamsRes.data || [],
       team_memberships: membershipsRes.data || [],
       team_weekly_entries: teamWeeklyRes.data || [],
       team_expenses: teamExpensesRes.data || [],
+      requests: requestsRes.data || [],
     };
     return { data: result, missing: false };
   };
@@ -620,6 +626,8 @@ import {
     if (appState.page === "dashboard") return renderDashboard(container);
     if (appState.page === "students")
       return renderStudents(appState, container);
+    if (appState.page === "instructors")
+      return renderInstructors(appState, container);
     if (appState.page === "courses") return renderCourses(appState, container);
     if (appState.page === "teams") return renderTeams(appState, container);
     if (appState.page === "reports") return renderReports(container);
@@ -628,7 +636,7 @@ import {
     if (appState.page === "makeRequest")
       return renderMakeRequest(appState, container);
     if (appState.page === "checkRequest")
-      return renderCheckRequest(appState, container);
+      return renderRequests(appState, container);
 
     if (appState.page === "student_detail")
       return renderStudentDetail(
@@ -1004,6 +1012,7 @@ import {
         [
           "dashboard",
           "students",
+          "instructors",
           "courses",
           "teams",
           "reports",

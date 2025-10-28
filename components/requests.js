@@ -4,13 +4,12 @@ import {
   formatISOForDisplay,
   HK_TZ,
   getStudentById,
+  ensureSupabaseClient,
+  setActiveNav,
 } from "../tools.js";
 
 export const renderMakeRequest = (appState, root) => {
-  console.log("appState", appState);
-
   const data = appState.data;
-  console.log("data.teams", data.teams);
 
   const header = document.createElement("div");
   header.className = "page-header";
@@ -21,8 +20,11 @@ export const renderMakeRequest = (appState, root) => {
 
   let options = "";
   data.teams.forEach((team) => {
-    options += `<option value="${team.team_name}">${team.team_name}</option>`;
+    options += `<option value="${team.id}">${team.team_name}</option>`;
   });
+
+  let date = new Date();
+  let formattedDate = date.toISOString().split("T")[0]; // Format YYYY-MM-DD
 
   grid.innerHTML = `
       <div class="grid-responsive card">
@@ -56,15 +58,18 @@ export const renderMakeRequest = (appState, root) => {
       ${options}
           </select>
         </div>
+
+      </div><div class="flex">
         <div class="field">
-          <label>Additional details</label>
+        <label>Date</label>
           <input
-            id="rqAddDetails"
+            id="rqDate"
             class="input"
-            placeholder="Additional details"
+           value="${formattedDate}"
+            type="date"
         
           />
-        </div>
+
       </div>
  
 
@@ -78,119 +83,251 @@ export const renderMakeRequest = (appState, root) => {
 
   root.appendChild(header);
   root.appendChild(grid);
+
+  root.querySelector("#saveRequest").addEventListener("click", async () => {
+    const client = ensureSupabaseClient(appState);
+
+    // Get the values from the input fields
+    const rqDesc = document.getElementById("rqDesc").value;
+    const cost = document.getElementById("cost").value;
+    const requestTeam = document.getElementById("requestTeam").value;
+    const rqAddDetails = document.getElementById("rqAddDetails").value;
+    const rqDate = document.getElementById("rqDate").value;
+
+    console.log("requestTeam", requestTeam);
+
+    const userEmail = localStorage.getItem("userEmail");
+    const role = localStorage.getItem("role");
+
+    // check if cost is numeric and > 0
+    if (isNaN(cost) || cost <= 0) {
+      showToast("Cost must be a positive number.", "error");
+      return;
+    }
+
+    // check if rqDesc is not empty
+    if (rqDesc === "") {
+      showToast("Request description cannot be empty.", "error");
+      return;
+    }
+
+    // make an insert into table requests in supabase
+    const { data, error } = await client
+      .from("requests")
+      .insert([
+        {
+          cost: cost,
+          date: rqDate,
+          team_id: requestTeam,
+          description: rqDesc,
+          status: "Pending",
+          request_author_type: role,
+        },
+      ])
+      .select();
+
+    // empty fields
+    document.getElementById("rqDesc").value = "";
+
+    showToast("Request saved.", "success");
+  });
 };
 
-export const renderCheckRequest = (appState, root) => {
+const showToast = (message, type = "info", timeout = 3000) => {
+  const container = document.getElementById("toastContainer");
+  const div = document.createElement("div");
+  div.className = `toast ${type}`;
+  div.textContent = message;
+  container.appendChild(div);
+  setTimeout(() => {
+    div.style.opacity = "0";
+    div.style.transform = "translateY(8px)";
+    setTimeout(() => div.remove(), 200);
+  }, timeout);
+};
+
+export const renderRequests = (appState, root) => {
   const data = appState.data;
+  const currentMonday = getCurrentMondayHKISO();
 
   const header = document.createElement("div");
   header.className = "page-header";
-  header.innerHTML = `<div class="page-title">Check outstanding requests</div>`;
+  header.innerHTML = `<div class="page-title">Requests</div>`;
 
-  const grid = document.createElement("div");
-  grid.className = "grid-responsive";
+  const table = document.createElement("table");
+  table.className = "table";
+  table.innerHTML = `
+      <thead>
+        <tr>   <th>Date</th>         
+        <th>Team</th>        
+          <th>Cost</th>  
+       <th>Description</th>
+              <th>Status</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
 
-  const last3Mondays = [0, -7, -14].map((off) =>
-    addDaysHK(getCurrentMondayHKISO(), off)
-  );
+  const applyFiltersRequest = () => {
+    const tbody = table.querySelector("tbody");
+    tbody.innerHTML = "";
 
-  for (const t of data.teams) {
-    const card = document.createElement("div");
-    card.className = "team-card";
-    const members = data.team_memberships
-      .filter((m) => m.team_id === t.id)
-      .map((m) => getStudentById(data, m.student_id).full_name);
-    const entries = data.team_weekly_entries
-      .filter((e) => e.team_id === t.id)
-      .sort((a, b) => (a.week_start_date < b.week_start_date ? 1 : -1));
+    let list = data.requests.slice();
 
-    const expenses = data.team_expenses.filter((e) => e.team_id === t.id);
+    // Convert team_id to name
+    list.forEach((request) => {
+      const team = data.teams.find((team) => team.id === request.team_id);
+      if (team) {
+        request.team_name = team.team_name;
+      }
+    });
 
-    card.innerHTML = `
-        <div class="team-header">
-          <div>
-            <div><strong>${t.team_name}</strong></div>
-            <div class="meta">${t.description}</div>
-                 <div class="meta">Budget: ${t.budget}</div>
-          </div>
-          <div class="badge">Members: ${members.length}</div>
-        </div>
-        <div class="team-members">${members.join(", ")}</div>
-          <div class="separator"></div>
-           <div><strong>Expenses</strong></div>
-            ${
-              /*Display expenses*/
+    // Order list by date
+    list.sort((a, b) => b.date.localeCompare(a.date));
 
-              expenses.length > 0
-                ? expenses
-                    .map((e) => {
-                      const date = new Date(e.created_at).toLocaleDateString(
-                        "en-US",
-                        { timeZone: HK_TZ }
-                      );
-                      return `
-    <div class="entry-card">
+    for (const s of list) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+            <td>${s.date}</td>
+            <td>${s.team_name}</td>
+            <td>${s.cost}</td>
+            <td>${s.description}</td>
+                    <td>${s.status}</td>
 
-      <div class="entry-body">
-                      <div><strong>Title</strong><div class="meta">${
-                        e.title || "-"
-                      }</div></div>
+        `;
 
-                                            <div><strong>Date</strong><div class="meta">${
-                                              date || "-"
-                                            }</div></div>
-        <div><strong>Amount</strong><div class="meta">${e.value}</div></div>
+      tr.addEventListener("click", () => {
+        if (s.status != "Pending") {
+          showToast(
+            "You can only accept or decline a pending request.",
+            "error"
+          );
+          return;
+        }
 
-        <div><strong>Description</strong><div class="meta">${
-          e.description || "-"
-        }</div></div>
-      </div>
-    </div>
-  `;
-                    })
-                    .join("")
-                : `<div class="entry-card"><strong>No expenses</strong></div>`
-            }
+        appState.page = "request_detail";
+        appState.selectedStudentId = s.id;
+        setActiveNav("checkRequest");
 
-        <div class="separator"></div>
-        <div>
-          <div class="meta" style="margin-bottom:6px;">Last 3 Mondays</div>
-          ${last3Mondays
-            .map((w) => {
-              const e = entries.find((x) => x.week_start_date === w);
-              if (!e)
-                return `<div class="entry-card"><strong>${formatISOForDisplay(
-                  w
-                )}</strong><div class="meta">No entry</div></div>`;
-              const goals = JSON.parse(e.team_goals_set_json);
-              const ng = JSON.parse(e.next_week_team_goals_json);
-              return `
-              <div class="entry-card">
-                <div class="entry-header"><strong>${formatISOForDisplay(
-                  e.week_start_date
-                )}</strong> • <span class="chip ${
-                e.team_overall_status
-              }">${e.team_overall_status.replace("_", " ")}</span></div>
-                <div class="entry-body">
-                  <div><strong>Team goals</strong><div class="meta">${goals
-                    .map((g) => `• ${g}`)
-                    .join("<br/>")}</div></div>
-                  <div><strong>Progress notes</strong><div class="meta">${
-                    e.team_progress_notes || "-"
-                  }</div></div>
-                  <div><strong>Next week goals</strong><div class="meta">${ng
-                    .map((g) => `• ${g}`)
-                    .join("<br/>")}</div></div>
-                </div>
-              </div>
-            `;
-            })
-            .join("")}
-        </div>
-      `;
-    grid.appendChild(card);
-  }
+        // Create and display the popup
+        const popup = document.createElement("div");
+        popup.className = "popup-overlay";
+
+        const popupContent = document.createElement("div");
+        popupContent.className = "popup-content";
+
+        // Add request details to the popup
+        const details = `
+        <p><strong>Date:</strong> ${s.date}</p>
+        <p><strong>Cost:</strong> ${s.cost} HKD</p>
+        <p><strong>Description:</strong> ${s.description}</p>
+    `;
+        popupContent.innerHTML = details; // Set the inner HTML with details
+
+        const acceptButton = document.createElement("button");
+        const declineButton = document.createElement("button");
+        const cancelButton = document.createElement("button");
+
+        acceptButton.textContent = "Accept";
+        declineButton.textContent = "Decline";
+        cancelButton.textContent = "Cancel";
+
+        acceptButton.className = "button";
+        declineButton.className = "button";
+        cancelButton.className = "button";
+
+        popupContent.appendChild(acceptButton);
+        popupContent.appendChild(declineButton);
+        popupContent.appendChild(cancelButton);
+        popup.appendChild(popupContent);
+        document.body.appendChild(popup);
+
+        // Close the popup on button click
+        cancelButton.addEventListener("click", () => {
+          document.body.removeChild(popup);
+        });
+
+        // Handle accept and decline actions
+        acceptButton.addEventListener("click", async () => {
+          // Update status DB in supabase
+          const client = ensureSupabaseClient(appState);
+
+          // make an insert into table requests in supabase
+          await client
+            .from("requests")
+            .update([
+              {
+                status: "Accepted",
+              },
+            ])
+            .eq("id", s.id);
+
+          // modify the team to deduct the expense to the budget
+
+          // get team current budget
+          const budget = await client
+            .from("teams")
+            .select("budget")
+            .eq("id", s.team_id);
+
+          const newBudget = budget.data[0].budget - s.cost;
+
+          await client
+            .from("teams")
+            .update([
+              {
+                budget: newBudget,
+              },
+            ])
+            .eq("id", s.team_id);
+
+          // Handle accept logic
+          console.log("Accepted request: ", s.id);
+          s.status = "Accepted"; // Change the status to 'Accepted'
+          tr.querySelector("td:last-child").textContent = s.status; // Update the last cell with the new status
+
+          document.body.removeChild(popup);
+
+          // Todo : create new team_expanses
+        });
+
+        declineButton.addEventListener("click", async () => {
+          // Update status DB in supabase
+          const client = ensureSupabaseClient(appState);
+
+          // make an insert into table requests in supabase
+          const { data, error } = await client
+            .from("requests")
+            .update([
+              {
+                status: "Declined",
+              },
+            ])
+            .eq("id", s.id);
+
+          // Handle decline logic
+          console.log("Declined request: ", s.id);
+
+          s.status = "Declined"; // Change the status to 'Accepted'
+          tr.querySelector("td:last-child").textContent = s.status; // Update the last cell with the new status
+
+          document.body.removeChild(popup);
+        });
+      });
+
+      tbody.appendChild(tr);
+    }
+  };
+
+  // Append header and table to root
+  root.appendChild(header);
+  root.appendChild(table);
+
+  applyFiltersRequest();
 
   root.appendChild(header);
-  root.appendChild(grid);
+
+  root.appendChild(table);
+
+  applyFiltersRequest();
 };
