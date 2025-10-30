@@ -29,6 +29,17 @@ export const renderMakeRequest = (appState, root) => {
   grid.innerHTML = `
       <div class="grid-responsive card">
       <div class="flex">
+
+        <div class="field">
+          <label>Request title</label>
+          <input
+            id="rqTitle"
+            class="input"
+            placeholder="Title of your request"
+        
+          />
+        </div>
+
         <div class="field">
           <label>Request description</label>
           <input
@@ -88,10 +99,11 @@ export const renderMakeRequest = (appState, root) => {
     const client = ensureSupabaseClient(appState);
 
     // Get the values from the input fields
+    const rqTitle = document.getElementById("rqTitle").value;
     const rqDesc = document.getElementById("rqDesc").value;
     const cost = document.getElementById("cost").value;
     const requestTeam = document.getElementById("requestTeam").value;
-    const rqAddDetails = document.getElementById("rqAddDetails").value;
+    // const rqAddDetails = document.getElementById("rqAddDetails").value;
     const rqDate = document.getElementById("rqDate").value;
 
     console.log("requestTeam", requestTeam);
@@ -105,7 +117,12 @@ export const renderMakeRequest = (appState, root) => {
       return;
     }
 
-    // check if rqDesc is not empty
+    // check if rqTitle is not empty
+    if (rqTitle === "") {
+      showToast("Request title cannot be empty.", "error");
+      return;
+    }
+
     if (rqDesc === "") {
       showToast("Request description cannot be empty.", "error");
       return;
@@ -119,6 +136,7 @@ export const renderMakeRequest = (appState, root) => {
           cost: cost,
           date: rqDate,
           team_id: requestTeam,
+          title: rqTitle,
           description: rqDesc,
           status: "Pending",
           request_author_type: role,
@@ -127,7 +145,11 @@ export const renderMakeRequest = (appState, root) => {
       .select();
 
     // empty fields
+    // Empty all fields
+    document.getElementById("rqTitle").value = "";
+
     document.getElementById("rqDesc").value = "";
+    document.getElementById("cost").value = 0;
 
     showToast("Request saved.", "success");
   });
@@ -161,6 +183,8 @@ export const renderRequests = (appState, root) => {
         <tr>   <th>Date</th>         
         <th>Team</th>        
           <th>Cost</th>  
+
+                 <th>Title</th>
        <th>Description</th>
               <th>Status</th>
         </tr>
@@ -191,6 +215,7 @@ export const renderRequests = (appState, root) => {
             <td>${s.date}</td>
             <td>${s.team_name}</td>
             <td>${s.cost}</td>
+                   <td>${s.title}</td>
             <td>${s.description}</td>
                     <td>${s.status}</td>
 
@@ -220,6 +245,7 @@ export const renderRequests = (appState, root) => {
         const details = `
         <p><strong>Date:</strong> ${s.date}</p>
         <p><strong>Cost:</strong> ${s.cost} HKD</p>
+                <p><strong>Title:</strong> ${s.title}</p>
         <p><strong>Description:</strong> ${s.description}</p>
     `;
         popupContent.innerHTML = details; // Set the inner HTML with details
@@ -288,7 +314,16 @@ export const renderRequests = (appState, root) => {
 
           document.body.removeChild(popup);
 
-          // Todo : create new team_expanses
+          // create new team_expenses
+
+          await client.from("team_expenses").insert([
+            {
+              team_id: s.team_id,
+              value: s.cost,
+              title: s.title,
+              description: s.description,
+            },
+          ]);
         });
 
         declineButton.addEventListener("click", async () => {
